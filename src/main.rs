@@ -1,8 +1,15 @@
+use std::string::String;
 use std::process::{ExitCode, Termination};
 use std::time::{Duration, Instant};
 use std::thread;
 
 use argh::FromArgs;
+use crossterm::style::Print;
+use crossterm::terminal::{Clear, ClearType};
+use std::io::{Write, stdout};
+use crossterm::{cursor, ExecutableCommand, QueueableCommand};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use snooze::sum_pause_args;
 
@@ -20,8 +27,8 @@ are summed.
 #[argh(help_triggers("-h", "--help", "help"))]
 struct SnoozeArgs {
     /// sleep compatibility mode - don't output how much time is still left
-    //#[argh(switch, short='q')]
-    //quiet: bool,
+    #[argh(switch, short='q')]
+    quiet: bool,
 
     /// display wall-clock time when snooze is expected to finish
     //#[argh(switch, short='e')]
@@ -57,28 +64,43 @@ fn main() -> SnoozeResult {
         println!("{HELP_REFERENCE}");
         return SnoozeResult::Bad;
     }
-    let nums: Vec<&str> = parsed_args.number.iter().map(|s| s.as_str()).collect();
 
-    // FIXME: error into SnoozeResult
-    let desired_runtime = sum_pause_args(&nums).unwrap();
-    println!("{:?}", desired_runtime);
-    // invalid arg - any - is SnoozeResult::Bad
-    //parsed_args.number.iter().try_fold(init, f)
+    let nums: Vec<&str> = parsed_args.number.iter().map(String::as_str).collect();
 
-    // calculate from args
-    //let desired_runtime = Duration::from_millis(2500);
+    let Some(desired_runtime) = sum_pause_args(&nums) else {
+        println!("Invalid time interval supplied");
+        println!("{HELP_REFERENCE}");
+        return SnoozeResult::Bad;
+    };
     let end_time = start_time + desired_runtime;
+    println!("{desired_runtime:?}");
 
     // jakaś logika, że mniej niż sekunda to po prostu śpimy z quiet
+
+    let mut stdout = stdout();
+    let sigusr_received = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGUSR1, Arc::clone(&sigusr_received)).unwrap();
 
     loop {
         let remaining = end_time - Instant::now();
         if remaining.is_zero() {
             break;
         }
-        println!("Left: {:?}", remaining);
+        let should_print = sigusr_received.load(Ordering::Relaxed);
+        if !parsed_args.quiet || should_print {
+            stdout
+                .queue(Clear(ClearType::CurrentLine)).unwrap()
+                .queue(cursor::Hide).unwrap()
+                .queue(cursor::MoveToColumn(0)).unwrap()
+                .queue(Print(format!("Left: {remaining:?}"))).unwrap()
+                .flush().unwrap();
+            sigusr_received.store(false, Ordering::Relaxed);
+        }
         thread::sleep(remaining.min(REFRESH_TIME));
     }
+
+    stdout.execute(cursor::Show).unwrap();
+    println!("");
 
     SnoozeResult::Good
 }

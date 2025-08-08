@@ -22,10 +22,10 @@ impl FromStr for SnoozeUnit {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "s" => Ok(SnoozeUnit::Seconds),
-            "m" => Ok(SnoozeUnit::Minutes),
-            "h" => Ok(SnoozeUnit::Hours),
-            "d" => Ok(SnoozeUnit::Days),
+            "s" => Ok(Self::Seconds),
+            "m" => Ok(Self::Minutes),
+            "h" => Ok(Self::Hours),
+            "d" => Ok(Self::Days),
             _ => Err(SnoozeUnitError),
         }
     }
@@ -58,11 +58,13 @@ fn parse_pause_arg(input: &str) -> Option<Duration> {
     };
 
     let seconds = number * multiplier;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let nano_seconds = (seconds * 1_000_000_000.0).trunc() as u64;
 
     Some(Duration::from_nanos(nano_seconds))
 }
 
+#[allow(clippy::must_use_candidate)]
 pub fn sum_pause_args(args: &[&str]) -> Option<Duration> {
     args
         .iter()
