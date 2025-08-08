@@ -1,15 +1,17 @@
+use std::io::{Write, stdout};
 use std::string::String;
 use std::process::{ExitCode, Termination};
 use std::time::{Duration, Instant};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use argh::FromArgs;
+use crossbeam_channel::{unbounded, Sender};
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType};
-use std::io::{Write, stdout};
 use crossterm::{cursor, ExecutableCommand, QueueableCommand};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use signal_hook::low_level;
+use signal_hook::iterator::{Handle, Signals};
+use signal_hook::consts::signal;
 
 use snooze::sum_pause_args;
 
@@ -39,11 +41,44 @@ struct SnoozeArgs {
 }
 
 
+enum SnoozeMessage {
+    USR1,
+}
+
+
+fn install_signal_handlers(sender: Sender<SnoozeMessage>) -> Option<(Handle, JoinHandle<()>)> {
+    let known_signals = [
+        signal::SIGUSR1,
+        signal::SIGTERM,
+        signal::SIGQUIT,
+        signal::SIGINT,
+    ];
+    let mut signals = Signals::new(&known_signals).ok()?;
+    let handle = signals.handle();
+    let thread = thread::spawn(move || {
+        for signal in &mut signals {
+            match signal {
+                signal::SIGUSR1 => {
+                    let _ = sender.send(SnoozeMessage::USR1);
+                },
+                signal::SIGTERM | signal::SIGQUIT | signal::SIGINT => {
+                    println!("super signal!");
+                    let _ = low_level::emulate_default_handler(signal);
+                }
+                _ => (),
+            }
+        }
+    });
+    Some((handle, thread))
+}
+
+
 // FIXME: jakie errory zwraca sleep?
 #[repr(u8)]
 pub enum SnoozeResult {
     Good = 0,
-    Bad = 1,
+    UserError = 1,
+    OsError = 2,
     Abort = 120,
 }
 
@@ -66,7 +101,7 @@ fn main() -> SnoozeResult {
             println!("Invalid time interval supplied");
         }
         println!("Run snooze --help for more information.");
-        return SnoozeResult::Bad;
+        return SnoozeResult::UserError;
     };
 
     let end_time = start_time + desired_runtime;
@@ -74,30 +109,39 @@ fn main() -> SnoozeResult {
 
     // jakaś logika, że mniej niż sekunda to po prostu śpimy z quiet
 
+    let (s, r) = unbounded();
     let mut stdout = stdout();
-    let sigusr_received = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGUSR1, Arc::clone(&sigusr_received)).unwrap();
+
+    let Some((signals_handle, signals_thread)) = install_signal_handlers(s.clone()) else {
+        println!("Couldn't create signal handlers");
+        return SnoozeResult::OsError;
+    };
 
     loop {
         let remaining = end_time - Instant::now();
         if remaining.is_zero() {
             break;
         }
-        let should_print = sigusr_received.load(Ordering::Relaxed);
-        if !parsed_args.quiet || should_print {
+        let handle_usr1 = match r.try_recv() {
+            Ok(_) => true,
+            Err(_) => false,
+        };
+        if !parsed_args.quiet || handle_usr1 {
             stdout
                 .queue(Clear(ClearType::CurrentLine)).unwrap()
                 .queue(cursor::Hide).unwrap()
                 .queue(cursor::MoveToColumn(0)).unwrap()
                 .queue(Print(format!("Left: {remaining:?}"))).unwrap()
                 .flush().unwrap();
-            sigusr_received.store(false, Ordering::Relaxed);
         }
         thread::sleep(remaining.min(REFRESH_TIME));
     }
 
     stdout.execute(cursor::Show).unwrap();
     println!();
+
+    signals_handle.close();
+    signals_thread.join().unwrap();
 
     SnoozeResult::Good
 }

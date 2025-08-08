@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 argh = { version = "0.1.13", default-features = false, features = ["help"] }
+crossbeam-channel = "0.5.15"
 crossterm = { version = "0.29.0", default-features = false, features = ["derive-more"] }
 signal-hook = "0.3.18"
 
