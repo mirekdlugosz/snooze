@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use snooze::sum_pause_args;
 
 const REFRESH_TIME: Duration = Duration::from_secs(1);
-const HELP_REFERENCE: &str = "Run snooze --help for more information.";
 
 /** Pause for specified time.
 Like sleep, but print how much time is still left.
@@ -59,19 +58,17 @@ fn main() -> SnoozeResult {
 
     let parsed_args: SnoozeArgs = argh::from_env();
 
-    if parsed_args.number.is_empty() {
-        println!("Missing mandatory arguments");
-        println!("{HELP_REFERENCE}");
-        return SnoozeResult::Bad;
-    }
-
-    let nums: Vec<&str> = parsed_args.number.iter().map(String::as_str).collect();
-
-    let Some(desired_runtime) = sum_pause_args(&nums) else {
-        println!("Invalid time interval supplied");
-        println!("{HELP_REFERENCE}");
+    let num_args: Vec<&str> = parsed_args.number.iter().map(String::as_str).collect();
+    let Some(desired_runtime) = sum_pause_args(&num_args) else {
+        if parsed_args.number.is_empty() {
+            println!("Missing mandatory arguments");
+        } else {
+            println!("Invalid time interval supplied");
+        }
+        println!("Run snooze --help for more information.");
         return SnoozeResult::Bad;
     };
+
     let end_time = start_time + desired_runtime;
     println!("{desired_runtime:?}");
 
@@ -100,7 +97,7 @@ fn main() -> SnoozeResult {
     }
 
     stdout.execute(cursor::Show).unwrap();
-    println!("");
+    println!();
 
     SnoozeResult::Good
 }
