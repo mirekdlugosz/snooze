@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -28,6 +29,35 @@ impl FromStr for SnoozeUnit {
             "d" => Ok(Self::Days),
             _ => Err(SnoozeUnitError),
         }
+    }
+}
+
+struct RemainingTime {
+    seconds: u64,
+    minutes: u64,
+    hours: u64,
+}
+
+impl Display for RemainingTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hours = match self.hours {
+            1.. => format!("{:3}:", self.hours),
+            0 => format!("    "),
+        };
+        let minutes = if self.hours > 0 {
+            format!("{:02}:", self.minutes)
+        } else {
+            match self.minutes {
+                10.. => format!("{}:", self.minutes),
+                1..10 => format!("{:2}:", self.minutes),
+                0 => format!("   "),
+            }
+        };
+        let seconds = if self.hours > 0 || self.minutes > 0  {
+            format!("{:02}", self.seconds)
+        } else { format!("{:2}", self.seconds) };
+
+        write!(f, "{hours}{minutes}{seconds}")
     }
 }
 
@@ -75,6 +105,21 @@ pub fn sum_pause_args(args: &[&str]) -> Option<Duration> {
             }
             Some(v)
         })
+}
+
+#[allow(clippy::must_use_candidate)]
+pub fn format_remaining_time(input: Duration) -> String {
+    let mut total_seconds = input.as_secs();
+    if input.subsec_nanos() > 500_000_000 {
+        total_seconds = total_seconds.saturating_add(1);
+    }
+    let hours = total_seconds.div_euclid(60 * 60);
+    let remaining_minutes = total_seconds.rem_euclid(60 * 60);
+    let minutes = remaining_minutes.div_euclid(60);
+    let seconds = remaining_minutes.rem_euclid(60);
+
+    let remaining = RemainingTime { hours, minutes, seconds };
+    remaining.to_string()
 }
 
 #[cfg(test)]
@@ -132,5 +177,22 @@ mod tests {
     fn test_sum_pause_args_invalid() {
         let input = ["1s", "5y", "1m"];
         assert_eq!(None, sum_pause_args(&input));
+    }
+
+    #[rstest]
+    #[case(Duration::from_secs(1), "        1")]
+    #[case(Duration::from_secs(11), "       11")]
+    #[case(Duration::from_secs(61), "     1:01")]
+    #[case(Duration::from_secs(81), "     1:21")]
+    #[case(Duration::from_secs(661), "    11:01")]
+    #[case(Duration::from_secs(701), "    11:41")]
+    #[case(Duration::from_secs(7200), "  2:00:00")]
+    #[case(Duration::from_secs(7100), "  1:58:20")]
+    #[case(Duration::from_secs(604800), "168:00:00")]
+    #[case(Duration::from_millis(900), "        1")]
+    #[case(Duration::from_millis(300), "        0")]
+    fn test_format_remaining_time(#[case] input: Duration, #[case] expected: &str) {
+        let result = format_remaining_time(input);
+        assert_eq!(result, expected);
     }
 }

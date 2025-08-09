@@ -13,7 +13,7 @@ use signal_hook::low_level;
 use signal_hook::iterator::{Handle, Signals};
 use signal_hook::consts::signal;
 
-use snooze::sum_pause_args;
+use snooze::{sum_pause_args, format_remaining_time};
 
 const REFRESH_TIME: Duration = Duration::from_secs(1);
 
@@ -85,11 +85,12 @@ fn start_ui(end_time: Instant, ui_receiver: Receiver<SnoozeMessage>) -> JoinHand
                 Ok(SnoozeMessage::Terminate(_)) | Err(_) => break,
                 Ok(SnoozeMessage::PrintTime) => {
                     let remaining = end_time - Instant::now();
+                    let formatted = format_remaining_time(remaining);
                     stdout
                         .queue(Clear(ClearType::CurrentLine)).unwrap()
                         .queue(cursor::Hide).unwrap()
                         .queue(cursor::MoveToColumn(0)).unwrap()
-                        .queue(Print(format!("Left: {remaining:?}"))).unwrap()
+                        .queue(Print(format!("{formatted}"))).unwrap()
                         .flush().unwrap();
                 }
             }

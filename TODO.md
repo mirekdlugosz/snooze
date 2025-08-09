@@ -1,4 +1,3 @@
-- print remaining time in [HHH:][MM:]SS format
 - optionally print wall-clock time when we expect to end [YYYY-MM-DD]HH:MM:SS
 - recognize if we were invoked by `sleep` binary / symlink
     - can we build two binaries out of single source?
