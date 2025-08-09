@@ -13,7 +13,7 @@ use signal_hook::low_level;
 use signal_hook::iterator::{Handle, Signals};
 use signal_hook::consts::signal;
 
-use snooze::{sum_pause_args, format_remaining_time};
+use snooze::{format_remaining_time, sum_pause_args, wall_clock_end_time};
 
 const REFRESH_TIME: Duration = Duration::from_secs(1);
 
@@ -32,8 +32,8 @@ struct SnoozeArgs {
     quiet: bool,
 
     /// display wall-clock time when snooze is expected to finish
-    //#[argh(switch, short='e')]
-    //with_end: bool,
+    #[argh(switch, short='t')]
+    only_timer: bool,
 
     /// time to pause
     #[argh(positional, greedy)]
@@ -77,7 +77,7 @@ fn install_signal_handlers(
 }
 
 
-fn start_ui(end_time: Instant, ui_receiver: Receiver<SnoozeMessage>) -> JoinHandle<()> {
+fn start_ui(end_time: Instant, formatted_end_time: String, ui_receiver: Receiver<SnoozeMessage>) -> JoinHandle<()> {
     let mut stdout = stdout();
     thread::spawn(move || {
         loop {
@@ -85,12 +85,12 @@ fn start_ui(end_time: Instant, ui_receiver: Receiver<SnoozeMessage>) -> JoinHand
                 Ok(SnoozeMessage::Terminate(_)) | Err(_) => break,
                 Ok(SnoozeMessage::PrintTime) => {
                     let remaining = end_time - Instant::now();
-                    let formatted = format_remaining_time(remaining);
+                    let formatted_remaining = format_remaining_time(remaining);
                     stdout
                         .queue(Clear(ClearType::CurrentLine)).unwrap()
                         .queue(cursor::Hide).unwrap()
                         .queue(cursor::MoveToColumn(0)).unwrap()
-                        .queue(Print(format!("{formatted}"))).unwrap()
+                        .queue(Print(format!("\t{formatted_remaining}\t{formatted_end_time}"))).unwrap()
                         .flush().unwrap();
                 }
             }
@@ -132,7 +132,10 @@ fn main() -> SnoozeResult {
     };
 
     let end_time = start_time + desired_runtime;
-    println!("{desired_runtime:?}");
+    let formatted_end_time = (!parsed_args.only_timer)
+        .then(|| wall_clock_end_time(desired_runtime))
+        .flatten()
+        .unwrap_or_default();
 
     // jakaś logika, że mniej niż sekunda to po prostu śpimy z quiet
 
@@ -144,7 +147,7 @@ fn main() -> SnoozeResult {
         return SnoozeResult::OsError;
     };
 
-    let ui_thread = start_ui(end_time, ui_receiver);
+    let ui_thread = start_ui(end_time, formatted_end_time, ui_receiver);
 
     let mut close_signal: Option<i32> = None;
 

@@ -2,6 +2,9 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
 
+use time::macros::format_description;
+use time::OffsetDateTime;
+
 const MULTIPLIER_SECONDS: f64 = 1.0;
 const MULTIPLIER_MINUTES: f64 = 60.0;
 const MULTIPLIER_HOURS: f64 = 60.0 * 60.0;
@@ -107,6 +110,28 @@ pub fn sum_pause_args(args: &[&str]) -> Option<Duration> {
         })
 }
 
+fn calc_wall_clock_end_time(beginning: OffsetDateTime, duration: Duration) -> Option<OffsetDateTime> {
+    let seconds = i64::try_from(duration.as_secs()).ok()?;
+    let nanos = i32::try_from(duration.subsec_nanos()).ok()?;
+    let time_duration = time::Duration::new(seconds, nanos);
+    Some(beginning.saturating_add(time_duration))
+}
+
+fn format_wall_clock_end_time(beginning: OffsetDateTime, end: OffsetDateTime) -> Option<String> {
+    let date = if beginning.date() != end.date() {
+        end.format(format_description!(version = 2, "[year]-[month]-[day] ")).ok()?
+    } else { format!("") };
+    let time = end.format(format_description!(version = 2, "[hour]:[minute]:[second]")).ok()?;
+    Some(format!("{date}{time}").to_string())
+}
+
+#[allow(clippy::must_use_candidate)]
+pub fn wall_clock_end_time(input: Duration) -> Option<String> {
+    let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let end = calc_wall_clock_end_time(now, input)?;
+    Some(format_wall_clock_end_time(now, end)?)
+}
+
 #[allow(clippy::must_use_candidate)]
 pub fn format_remaining_time(input: Duration) -> String {
     let mut total_seconds = input.as_secs();
@@ -177,6 +202,36 @@ mod tests {
     fn test_sum_pause_args_invalid() {
         let input = ["1s", "5y", "1m"];
         assert_eq!(None, sum_pause_args(&input));
+    }
+
+    #[rstest]
+    #[case(1565442000, 3600)]
+    #[case(1709208000, 3600)] // leap year
+    #[case(1740744000, 3600)] // February non-leap year
+    #[case(1745539140, 3600)] // cross midnight line - day
+    #[case(1746057540, 3600)] // cross midnight line - month
+    #[case(1735689540, 3600)] // cross midnight line - year
+    #[case(1754690400, 36 * 60 * 60)] // more than a day duration
+    fn test_calc_wall_clock_end_time(#[case] beginning_ts: i64, #[case] duration: i64) {
+        let beginning = OffsetDateTime::from_unix_timestamp(beginning_ts).unwrap();
+        let result = calc_wall_clock_end_time(beginning, Duration::from_secs(duration as u64));
+        let expected = OffsetDateTime::from_unix_timestamp(beginning_ts + duration).unwrap();
+        assert_eq!(result, Some(expected));
+    }
+
+    #[rstest]
+    #[case(1565442000, 3600, "14:00:00")]
+    #[case(1709208000, 3600, "13:00:00")] // leap year
+    #[case(1740744000, 3600, "13:00:00")] // February non-leap year
+    #[case(1745539140, 3600, "2025-04-25 00:59:00")] // cross midnight line - day
+    #[case(1746057540, 3600, "2025-05-01 00:59:00")] // cross midnight line - month
+    #[case(1735689540, 3600, "2025-01-01 00:59:00")] // cross midnight line - year
+    #[case(1754690400, 36 * 60 * 60, "2025-08-10 10:00:00")] // more than a day duration
+    fn test_format_wall_clock_end_time(#[case] beginning_ts: i64, #[case] duration: i64, #[case] expected: &str) {
+        let beginning = OffsetDateTime::from_unix_timestamp(beginning_ts).unwrap();
+        let end = OffsetDateTime::from_unix_timestamp(beginning_ts + duration).unwrap();
+        let result = format_wall_clock_end_time(beginning, end);
+        assert_eq!(result, Some(expected.to_string()));
     }
 
     #[rstest]

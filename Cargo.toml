@@ -8,6 +8,7 @@ argh = { version = "0.1.13", default-features = false, features = ["help"] }
 crossbeam-channel = "0.5.15"
 crossterm = { version = "0.29.0", default-features = false, features = ["derive-more"] }
 signal-hook = "0.3.18"
+time = { version = "0.3.41", features = ["formatting", "local-offset", "macros"] }
 
 [dev-dependencies]
 rstest = { version = "0.26.1", features = ["crate-name"], default-features = false }
