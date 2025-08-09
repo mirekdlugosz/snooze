@@ -55,6 +55,7 @@ fn install_signal_handlers(
     let known_signals = [
         signal::SIGUSR1,
         signal::SIGTSTP,
+        signal::SIGHUP,
         signal::SIGTERM,
         signal::SIGQUIT,
         signal::SIGINT,
@@ -71,7 +72,7 @@ fn install_signal_handlers(
                     let _ = ui_sender.send(SnoozeMessage::Suspend);
                     let _ = loop_sender.send(SnoozeMessage::Suspend);
                 }
-                signal::SIGTERM | signal::SIGQUIT | signal::SIGINT => {
+                signal::SIGTERM | signal::SIGQUIT | signal::SIGINT | signal::SIGHUP => {
                     let _ = ui_sender.send(SnoozeMessage::Terminate(signalid));
                     let _ = loop_sender.send(SnoozeMessage::Terminate(signalid));
                 }
