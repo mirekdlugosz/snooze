@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{Write, stdout};
+use std::io::{stdin, stdout, Write};
 use std::string::String;
 use std::process::{ExitCode, Termination};
 use std::time::{Duration, Instant};
@@ -10,6 +10,7 @@ use crossbeam_channel::{self, Sender, Receiver};
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{cursor, ExecutableCommand, QueueableCommand};
+use nix::unistd;
 use signal_hook::low_level;
 use signal_hook::iterator::{Handle, Signals};
 use signal_hook::consts::signal;
@@ -44,6 +45,7 @@ struct SnoozeArgs {
 
 enum SnoozeMessage {
     PrintTime,
+    Suspend,
     Terminate(i32),
 }
 
@@ -54,6 +56,7 @@ fn install_signal_handlers(
 ) -> Option<(Handle, JoinHandle<()>)> {
     let known_signals = [
         signal::SIGUSR1,
+        signal::SIGTSTP,
         signal::SIGTERM,
         signal::SIGQUIT,
         signal::SIGINT,
@@ -65,6 +68,10 @@ fn install_signal_handlers(
             match signal {
                 signal::SIGUSR1 => {
                     let _ = ui_sender.send(SnoozeMessage::PrintTime);
+                },
+                signal::SIGTSTP => {
+                    let _ = ui_sender.send(SnoozeMessage::Suspend);
+                    let _ = loop_sender.send(SnoozeMessage::Suspend);
                 },
                 signal::SIGTERM | signal::SIGQUIT | signal::SIGINT => {
                     let _ = ui_sender.send(SnoozeMessage::Terminate(signal));
@@ -84,30 +91,39 @@ fn start_ui(end_time: Instant, formatted_end_time: String, ui_receiver: Receiver
         loop {
             match ui_receiver.recv() {
                 Ok(SnoozeMessage::Terminate(_)) | Err(_) => break,
+                Ok(SnoozeMessage::Suspend) => {
+                    stdout.execute(cursor::Show).unwrap();
+                },
                 Ok(SnoozeMessage::PrintTime) => {
+                    let is_foreground = unistd::tcgetpgrp(stdin())
+                        .ok()
+                        .and_then(|pid| Some(pid == unistd::getpgrp()))
+                        .unwrap_or(false);
+
+                    if !is_foreground {
+                        continue;
+                    }
+
                     let remaining = end_time - Instant::now();
                     let formatted_remaining = format_remaining_time(remaining);
                     stdout
-                        .queue(Clear(ClearType::CurrentLine)).unwrap()
                         .queue(cursor::Hide).unwrap()
-                        .queue(cursor::MoveToColumn(0)).unwrap()
-                        .queue(Print(format!("\t{formatted_remaining}\t{formatted_end_time}"))).unwrap()
+                        .queue(Clear(ClearType::CurrentLine)).unwrap()
+                        .queue(Print(format!("\t{formatted_remaining}\t{formatted_end_time}\n"))).unwrap()
+                        .queue(cursor::MoveToPreviousLine(1)).unwrap()
                         .flush().unwrap();
                 }
             }
         }
         stdout.execute(cursor::Show).unwrap();
-        println!();
     })
 }
 
-// FIXME: jakie errory zwraca sleep?
 #[repr(u8)]
 pub enum SnoozeResult {
     Good = 0,
     UserError = 1,
     OsError = 2,
-    Abort = 120,
 }
 
 impl Termination for SnoozeResult {
@@ -159,13 +175,14 @@ fn main() -> SnoozeResult {
 
     loop {
         match loop_receiver.try_recv() {
+            Ok(SnoozeMessage::Suspend) => {
+                let _ = low_level::emulate_default_handler(signal::SIGTSTP);
+            },
             Ok(SnoozeMessage::Terminate(signal_)) => {
                 close_signal = Some(signal_);
                 break;
             },
-            Ok(SnoozeMessage::PrintTime) => (),
-            // FIXME: ok to ignore errors?
-            Err(_) => (),
+            Ok(_) | Err(_) => (),
         }
         let remaining = end_time - Instant::now();
         if remaining.is_zero() {
