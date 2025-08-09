@@ -1,19 +1,19 @@
 use std::env;
-use std::io::{stdin, stdout, Write};
-use std::string::String;
+use std::io::{Write, stdin, stdout};
 use std::process::{ExitCode, Termination};
-use std::time::{Duration, Instant};
+use std::string::String;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use argh::FromArgs;
-use crossbeam_channel::{self, Sender, Receiver};
+use crossbeam_channel::{self, Receiver, Sender};
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType};
-use crossterm::{cursor, ExecutableCommand, QueueableCommand};
+use crossterm::{ExecutableCommand, QueueableCommand, cursor};
 use nix::unistd;
-use signal_hook::low_level;
-use signal_hook::iterator::{Handle, Signals};
 use signal_hook::consts::signal;
+use signal_hook::iterator::{Handle, Signals};
+use signal_hook::low_level;
 
 use snooze::{format_remaining_time, sum_pause_args, wall_clock_end_time};
 
@@ -30,18 +30,17 @@ are summed.
 #[argh(help_triggers("-h", "--help", "help"))]
 struct SnoozeArgs {
     /// sleep compatibility mode - don't output how much time is still left
-    #[argh(switch, short='q')]
+    #[argh(switch, short = 'q')]
     quiet: bool,
 
     /// display wall-clock time when snooze is expected to finish
-    #[argh(switch, short='t')]
+    #[argh(switch, short = 't')]
     only_timer: bool,
 
     /// time to pause
     #[argh(positional, greedy)]
-    number: Vec<String>
+    number: Vec<String>,
 }
-
 
 enum SnoozeMessage {
     PrintTime,
@@ -49,10 +48,9 @@ enum SnoozeMessage {
     Terminate(i32),
 }
 
-
 fn install_signal_handlers(
     loop_sender: Sender<SnoozeMessage>,
-    ui_sender: Sender<SnoozeMessage>
+    ui_sender: Sender<SnoozeMessage>,
 ) -> Option<(Handle, JoinHandle<()>)> {
     let known_signals = [
         signal::SIGUSR1,
@@ -68,11 +66,11 @@ fn install_signal_handlers(
             match signal {
                 signal::SIGUSR1 => {
                     let _ = ui_sender.send(SnoozeMessage::PrintTime);
-                },
+                }
                 signal::SIGTSTP => {
                     let _ = ui_sender.send(SnoozeMessage::Suspend);
                     let _ = loop_sender.send(SnoozeMessage::Suspend);
-                },
+                }
                 signal::SIGTERM | signal::SIGQUIT | signal::SIGINT => {
                     let _ = ui_sender.send(SnoozeMessage::Terminate(signal));
                     let _ = loop_sender.send(SnoozeMessage::Terminate(signal));
@@ -84,8 +82,11 @@ fn install_signal_handlers(
     Some((handle, thread))
 }
 
-
-fn start_ui(end_time: Instant, formatted_end_time: String, ui_receiver: Receiver<SnoozeMessage>) -> JoinHandle<()> {
+fn start_ui(
+    end_time: Instant,
+    formatted_end_time: String,
+    ui_receiver: Receiver<SnoozeMessage>,
+) -> JoinHandle<()> {
     let mut stdout = stdout();
     thread::spawn(move || {
         loop {
@@ -93,12 +94,11 @@ fn start_ui(end_time: Instant, formatted_end_time: String, ui_receiver: Receiver
                 Ok(SnoozeMessage::Terminate(_)) | Err(_) => break,
                 Ok(SnoozeMessage::Suspend) => {
                     stdout.execute(cursor::Show).unwrap();
-                },
+                }
                 Ok(SnoozeMessage::PrintTime) => {
                     let is_foreground = unistd::tcgetpgrp(stdin())
                         .ok()
-                        .and_then(|pid| Some(pid == unistd::getpgrp()))
-                        .unwrap_or(false);
+                        .is_some_and(|pid| pid == unistd::getpgrp());
 
                     if !is_foreground {
                         continue;
@@ -107,11 +107,18 @@ fn start_ui(end_time: Instant, formatted_end_time: String, ui_receiver: Receiver
                     let remaining = end_time - Instant::now();
                     let formatted_remaining = format_remaining_time(remaining);
                     stdout
-                        .queue(cursor::Hide).unwrap()
-                        .queue(Clear(ClearType::CurrentLine)).unwrap()
-                        .queue(Print(format!("\t{formatted_remaining}\t{formatted_end_time}\n"))).unwrap()
-                        .queue(cursor::MoveToPreviousLine(1)).unwrap()
-                        .flush().unwrap();
+                        .queue(cursor::Hide)
+                        .unwrap()
+                        .queue(Clear(ClearType::CurrentLine))
+                        .unwrap()
+                        .queue(Print(format!(
+                            "\t{formatted_remaining}\t{formatted_end_time}\n"
+                        )))
+                        .unwrap()
+                        .queue(cursor::MoveToPreviousLine(1))
+                        .unwrap()
+                        .flush()
+                        .unwrap();
                 }
             }
         }
@@ -164,7 +171,9 @@ fn main() -> SnoozeResult {
     let (loop_sender, loop_receiver) = crossbeam_channel::unbounded();
     let (ui_sender, ui_receiver) = crossbeam_channel::unbounded();
 
-    let Some((signals_handle, signals_thread)) = install_signal_handlers(loop_sender, ui_sender.clone()) else {
+    let Some((signals_handle, signals_thread)) =
+        install_signal_handlers(loop_sender, ui_sender.clone())
+    else {
         println!("Couldn't create signal handlers");
         return SnoozeResult::OsError;
     };
@@ -177,11 +186,11 @@ fn main() -> SnoozeResult {
         match loop_receiver.try_recv() {
             Ok(SnoozeMessage::Suspend) => {
                 let _ = low_level::emulate_default_handler(signal::SIGTSTP);
-            },
+            }
             Ok(SnoozeMessage::Terminate(signal_)) => {
                 close_signal = Some(signal_);
                 break;
-            },
+            }
             Ok(_) | Err(_) => (),
         }
         let remaining = end_time - Instant::now();
