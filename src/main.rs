@@ -62,8 +62,8 @@ fn install_signal_handlers(
     let mut signals = Signals::new(known_signals).ok()?;
     let handle = signals.handle();
     let thread = thread::spawn(move || {
-        for signal in &mut signals {
-            match signal {
+        for signalid in &mut signals {
+            match signalid {
                 signal::SIGUSR1 => {
                     let _ = ui_sender.send(SnoozeMessage::PrintTime);
                 }
@@ -72,14 +72,31 @@ fn install_signal_handlers(
                     let _ = loop_sender.send(SnoozeMessage::Suspend);
                 }
                 signal::SIGTERM | signal::SIGQUIT | signal::SIGINT => {
-                    let _ = ui_sender.send(SnoozeMessage::Terminate(signal));
-                    let _ = loop_sender.send(SnoozeMessage::Terminate(signal));
+                    let _ = ui_sender.send(SnoozeMessage::Terminate(signalid));
+                    let _ = loop_sender.send(SnoozeMessage::Terminate(signalid));
                 }
                 _ => (),
             }
         }
     });
     Some((handle, thread))
+}
+
+fn is_foreground() -> bool {
+    unistd::tcgetpgrp(stdin())
+        .ok()
+        .is_some_and(|pid| pid == unistd::getpgrp())
+}
+
+fn print_remaining_time(msg: &str) -> std::io::Result<()> {
+    let mut stdout = stdout();
+    stdout
+        .queue(cursor::Hide)?
+        .queue(Clear(ClearType::CurrentLine))?
+        .queue(cursor::MoveToColumn(0))?
+        .queue(Print(msg))?
+        .flush()?;
+    Ok(())
 }
 
 fn start_ui(
@@ -89,40 +106,36 @@ fn start_ui(
 ) -> JoinHandle<()> {
     let mut stdout = stdout();
     thread::spawn(move || {
+        let mut did_print = false;
+        let mut clean_exit = true;
         loop {
             match ui_receiver.recv() {
-                Ok(SnoozeMessage::Terminate(_)) | Err(_) => break,
+                Ok(SnoozeMessage::Terminate(signal)) => {
+                    clean_exit = signal == 0;
+                    break;
+                }
                 Ok(SnoozeMessage::Suspend) => {
-                    stdout.execute(cursor::Show).unwrap();
+                    let _ = stdout.execute(cursor::Show);
                 }
                 Ok(SnoozeMessage::PrintTime) => {
-                    let is_foreground = unistd::tcgetpgrp(stdin())
-                        .ok()
-                        .is_some_and(|pid| pid == unistd::getpgrp());
-
-                    if !is_foreground {
+                    if !is_foreground() {
                         continue;
                     }
 
                     let remaining = end_time - Instant::now();
                     let formatted_remaining = format_remaining_time(remaining);
-                    stdout
-                        .queue(cursor::Hide)
-                        .unwrap()
-                        .queue(Clear(ClearType::CurrentLine))
-                        .unwrap()
-                        .queue(Print(format!(
-                            "\t{formatted_remaining}\t{formatted_end_time}\n"
-                        )))
-                        .unwrap()
-                        .queue(cursor::MoveToPreviousLine(1))
-                        .unwrap()
-                        .flush()
-                        .unwrap();
+                    let msg = format!("\t{formatted_remaining}\t{formatted_end_time}");
+                    if print_remaining_time(msg.as_str()).is_ok() {
+                        did_print = true;
+                    }
                 }
+                Err(_) => break,
             }
         }
-        stdout.execute(cursor::Show).unwrap();
+        if clean_exit && did_print && is_foreground() {
+            println!();
+        }
+        let _ = stdout.execute(cursor::Show);
     })
 }
 
@@ -187,8 +200,8 @@ fn main() -> SnoozeResult {
             Ok(SnoozeMessage::Suspend) => {
                 let _ = low_level::emulate_default_handler(signal::SIGTSTP);
             }
-            Ok(SnoozeMessage::Terminate(signal_)) => {
-                close_signal = Some(signal_);
+            Ok(SnoozeMessage::Terminate(signal)) => {
+                close_signal = Some(signal);
                 break;
             }
             Ok(_) | Err(_) => (),
@@ -203,10 +216,10 @@ fn main() -> SnoozeResult {
         thread::sleep(remaining.min(REFRESH_TIME));
     }
 
-    let _ = ui_sender.send(SnoozeMessage::Terminate(0));
+    let _ = ui_sender.send(SnoozeMessage::Terminate(close_signal.unwrap_or(0)));
     signals_handle.close();
-    ui_thread.join().unwrap();
-    signals_thread.join().unwrap();
+    let _ = ui_thread.join();
+    let _ = signals_thread.join();
     if let Some(signal_) = close_signal {
         let _ = low_level::emulate_default_handler(signal_);
     }
