@@ -1,3 +1,1 @@
-- recognize if we were invoked by `sleep` binary / symlink
-    - can we build two binaries out of single source?
 - add README

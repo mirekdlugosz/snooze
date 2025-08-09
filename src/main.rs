@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{Write, stdout};
 use std::string::String;
 use std::process::{ExitCode, Termination};
@@ -137,7 +138,12 @@ fn main() -> SnoozeResult {
         .flatten()
         .unwrap_or_default();
 
-    // jakaś logika, że mniej niż sekunda to po prostu śpimy z quiet
+    let short_sleep = REFRESH_TIME > desired_runtime;
+    let invoked_as_sleep = env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|fname| fname == "sleep"))
+        .unwrap_or(false);
+    let quiet_mode = parsed_args.quiet || short_sleep || invoked_as_sleep;
 
     let (loop_sender, loop_receiver) = crossbeam_channel::unbounded();
     let (ui_sender, ui_receiver) = crossbeam_channel::unbounded();
@@ -165,14 +171,13 @@ fn main() -> SnoozeResult {
         if remaining.is_zero() {
             break;
         }
-        if !parsed_args.quiet {
+        if !quiet_mode {
             let _ = ui_sender.try_send(SnoozeMessage::PrintTime);
         }
         thread::sleep(remaining.min(REFRESH_TIME));
     }
 
     let _ = ui_sender.send(SnoozeMessage::Terminate(0));
-
     signals_handle.close();
     ui_thread.join().unwrap();
     signals_thread.join().unwrap();
