@@ -20,7 +20,7 @@ use snooze::{format_remaining_time, sum_pause_args, wall_clock_end_time};
 const REFRESH_TIME: Duration = Duration::from_secs(1);
 
 /** Pause for specified time.
-Like sleep, but print how much time is still left.
+Like sleep, but show how much time is still left.
 Positional arguments specify how long to pause. They need not to be an integer.
 A number may be followed by a suffix: 's' for seconds (default if no suffix is
 provided), 'm' for minutes, 'h' for hours or 'd' for days. Multiple arguments
